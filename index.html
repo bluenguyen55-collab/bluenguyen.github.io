@@ -1,0 +1,1316 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>StudyAI - Quản lý học tập & Ôn thi thông minh</title>
+  
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- Google Fonts: Inter -->
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  
+  <!-- React & ReactDOM -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  
+  <!-- Babel Standalone for JSX -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  
+  <!-- PDF.js for reading PDF files -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <script>
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  </script>
+
+  <style>
+    body {
+      font-family: 'Inter', sans-serif;
+      background-color: #f8fafc;
+    }
+    /* Custom scrollbar */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #f1f5f9;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #cbd5e1;
+      border-radius: 3px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #94a3b8;
+    }
+  </style>
+</head>
+<body class="text-slate-800 antialiased">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useRef } = React;
+
+    // --- HELPER COMPONENT FOR LUCIDE ICONS ---
+    const Icon = ({ name, size = 18, className = "" }) => {
+      const iconRef = useRef(null);
+
+      useEffect(() => {
+        if (iconRef.current && window.lucide) {
+          iconRef.current.innerHTML = '';
+          const iconElement = document.createElement('i');
+          iconElement.setAttribute('data-lucide', name);
+          iconRef.current.appendChild(iconElement);
+          window.lucide.createIcons({
+            root: iconRef.current,
+            attrs: {
+              width: size,
+              height: size,
+              class: className
+            }
+          });
+        }
+      }, [name, size, className]);
+
+      return <span ref={iconRef} className="inline-flex items-center justify-center shrink-0"></span>;
+    };
+
+    // --- DEFAULT INITIAL DATA ---
+    const DEFAULT_SUBJECTS = [
+      { id: 'sub-1', name: 'Toán học', color: 'bg-blue-500', textColor: 'text-blue-700', bgLight: 'bg-blue-50' },
+      { id: 'sub-2', name: 'Ngữ văn', color: 'bg-rose-500', textColor: 'text-rose-700', bgLight: 'bg-rose-50' },
+      { id: 'sub-3', name: 'Địa lí', color: 'bg-emerald-500', textColor: 'text-emerald-700', bgLight: 'bg-emerald-50' },
+      { id: 'sub-4', name: 'Tiếng Anh', color: 'bg-amber-500', textColor: 'text-amber-700', bgLight: 'bg-amber-50' },
+    ];
+
+    const DEFAULT_TODOS = [
+      { id: 'todo-1', title: 'Giải đề thi thử THPTQG số 01', subjectId: 'sub-1', priority: 'high', deadline: new Date().toISOString().split('T')[0], completed: false },
+      { id: 'todo-2', title: 'Lập dàn ý phân tích tác phẩm văn học', subjectId: 'sub-2', priority: 'medium', deadline: new Date(Date.now() + 86400000).toISOString().split('T')[0], completed: false },
+      { id: 'todo-3', title: 'Ôn tập Atlat Địa lí Việt Nam', subjectId: 'sub-3', priority: 'low', deadline: new Date(Date.now() + 172800000).toISOString().split('T')[0], completed: true },
+    ];
+
+    const SUBJECT_COLORS = [
+      { name: 'Xanh dương', color: 'bg-blue-500', textColor: 'text-blue-700', bgLight: 'bg-blue-50' },
+      { name: 'Đỏ hồng', color: 'bg-rose-500', textColor: 'text-rose-700', bgLight: 'bg-rose-50' },
+      { name: 'Xanh ngọc', color: 'bg-emerald-500', textColor: 'text-emerald-700', bgLight: 'bg-emerald-50' },
+      { name: 'Vàng cam', color: 'bg-amber-500', textColor: 'text-amber-700', bgLight: 'bg-amber-50' },
+      { name: 'Tím', color: 'bg-purple-500', textColor: 'text-purple-700', bgLight: 'bg-purple-50' },
+      { name: 'Xanh lơ', color: 'bg-cyan-500', textColor: 'text-cyan-700', bgLight: 'bg-cyan-50' },
+    ];
+
+    // --- MAIN APPLICATION ---
+    function App() {
+      // Navigation & Modal States
+      const [activeTab, setActiveTab] = useState('planner'); // 'planner' | 'exam'
+      const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+
+      // Settings / API Key State
+      const [apiKey, setApiKey] = useState(() => localStorage.getItem('studyai_gemini_key') || '');
+      const [tempApiKey, setTempApiKey] = useState(apiKey);
+      const [keySavedToast, setKeySavedToast] = useState(false);
+
+      // --- TAB 1 STATES: PLANNER & POMODORO ---
+      const [subjects, setSubjects] = useState(() => {
+        const saved = localStorage.getItem('studyai_subjects');
+        return saved ? JSON.parse(saved) : DEFAULT_SUBJECTS;
+      });
+      const [todos, setTodos] = useState(() => {
+        const saved = localStorage.getItem('studyai_todos');
+        return saved ? JSON.parse(saved) : DEFAULT_TODOS;
+      });
+
+      // Subject Form
+      const [newSubjectName, setNewSubjectName] = useState('');
+      const [selectedColorIdx, setSelectedColorIdx] = useState(0);
+
+      // Todo Form & Filters
+      const [todoTitle, setTodoTitle] = useState('');
+      const [todoSubjectId, setTodoSubjectId] = useState(subjects[0]?.id || '');
+      const [todoPriority, setTodoPriority] = useState('medium');
+      const [todoDeadline, setTodoDeadline] = useState(new Date().toISOString().split('T')[0]);
+      const [filterSubject, setFilterSubject] = useState('all');
+
+      // Pomodoro Timer States
+      const [pomodoroMode, setPomodoroMode] = useState('work'); // 'work' (25m) | 'break' (5m)
+      const [timeLeft, setTimeLeft] = useState(25 * 60);
+      const [isRunning, setIsRunning] = useState(false);
+      const [pomodoroSessions, setPomodoroSessions] = useState(() => Number(localStorage.getItem('studyai_pomo_count')) || 0);
+
+      // --- TAB 2 STATES: AI EXAM GENERATOR ---
+      const [studyMaterial, setStudyMaterial] = useState('');
+      const [fileName, setFileName] = useState('');
+      const [isParsingFile, setIsParsingFile] = useState(false);
+      
+      // Exam Config
+      const [questionCount, setQuestionCount] = useState(5);
+      const [difficulty, setDifficulty] = useState('Trung bình');
+      const [questionType, setQuestionType] = useState('Trắc nghiệm 4 đáp án');
+      
+      // Exam Execution States
+      const [isGenerating, setIsGenerating] = useState(false);
+      const [examError, setExamError] = useState('');
+      const [questions, setQuestions] = useState([]);
+      const [userAnswers, setUserAnswers] = useState({});
+      const [isSubmitted, setIsSubmitted] = useState(false);
+      const [examHistorySeed, setExamHistorySeed] = useState(0);
+
+      // --- PERSISTENCE EFFECTS ---
+      useEffect(() => {
+        localStorage.setItem('studyai_subjects', JSON.stringify(subjects));
+        if (subjects.length > 0 && !subjects.find(s => s.id === todoSubjectId)) {
+          setTodoSubjectId(subjects[0].id);
+        }
+      }, [subjects]);
+
+      useEffect(() => {
+        localStorage.setItem('studyai_todos', JSON.stringify(todos));
+      }, [todos]);
+
+      useEffect(() => {
+        localStorage.setItem('studyai_pomo_count', pomodoroSessions.toString());
+      }, [pomodoroSessions]);
+
+      // --- POMODORO TIMER EFFECT ---
+      useEffect(() => {
+        let timer = null;
+        if (isRunning && timeLeft > 0) {
+          timer = setInterval(() => {
+            setTimeLeft((prev) => prev - 1);
+          }, 1000);
+        } else if (isRunning && timeLeft === 0) {
+          setIsRunning(false);
+          playNotificationBeep();
+          if (pomodoroMode === 'work') {
+            setPomodoroSessions(s => s + 1);
+            setPomodoroMode('break');
+            setTimeLeft(5 * 60);
+          } else {
+            setPomodoroMode('work');
+            setTimeLeft(25 * 60);
+          }
+        }
+        return () => clearInterval(timer);
+      }, [isRunning, timeLeft, pomodoroMode]);
+
+      const playNotificationBeep = () => {
+        try {
+          const ctx = new (window.AudioContext || window.webkitAudioContext)();
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(880, ctx.currentTime);
+          gain.gain.setValueAtTime(0.1, ctx.currentTime);
+          osc.start();
+          osc.stop(ctx.currentTime + 0.4);
+        } catch (e) {
+          console.log('Audio not supported or blocked');
+        }
+      };
+
+      const switchPomodoroMode = (mode) => {
+        setIsRunning(false);
+        setPomodoroMode(mode);
+        setTimeLeft(mode === 'work' ? 25 * 60 : 5 * 60);
+      };
+
+      const formatTime = (seconds) => {
+        const m = Math.floor(seconds / 60).toString().padStart(2, '0');
+        const s = (seconds % 60).toString().padStart(2, '0');
+        return `${m}:${s}`;
+      };
+
+      // --- SETTINGS HANDLERS ---
+      const handleSaveApiKey = (e) => {
+        e.preventDefault();
+        const trimmed = tempApiKey.trim();
+        setApiKey(trimmed);
+        localStorage.setItem('studyai_gemini_key', trimmed);
+        setKeySavedToast(true);
+        setTimeout(() => {
+          setKeySavedToast(false);
+          setIsSettingsOpen(false);
+        }, 1200);
+      };
+
+      // --- TAB 1 HANDLERS: SUBJECTS & TODOS ---
+      const handleAddSubject = (e) => {
+        e.preventDefault();
+        if (!newSubjectName.trim()) return;
+        const colorObj = SUBJECT_COLORS[selectedColorIdx];
+        const newSub = {
+          id: 'sub-' + Date.now(),
+          name: newSubjectName.trim(),
+          ...colorObj
+        };
+        setSubjects([...subjects, newSub]);
+        setNewSubjectName('');
+        setSelectedColorIdx((selectedColorIdx + 1) % SUBJECT_COLORS.length);
+      };
+
+      const handleDeleteSubject = (id) => {
+        setSubjects(subjects.filter(s => s.id !== id));
+        setTodos(todos.filter(t => t.subjectId !== id));
+        if (filterSubject === id) setFilterSubject('all');
+      };
+
+      const handleAddTodo = (e) => {
+        e.preventDefault();
+        if (!todoTitle.trim()) return;
+        const newTodo = {
+          id: 'todo-' + Date.now(),
+          title: todoTitle.trim(),
+          subjectId: todoSubjectId || (subjects[0]?.id ?? ''),
+          priority: todoPriority,
+          deadline: todoDeadline,
+          completed: false
+        };
+        setTodos([newTodo, ...todos]);
+        setTodoTitle('');
+      };
+
+      const toggleTodo = (id) => {
+        setTodos(todos.map(t => t.id === id ? { ...t, completed: !t.completed } : t));
+      };
+
+      const deleteTodo = (id) => {
+        setTodos(todos.filter(t => t.id !== id));
+      };
+
+      // --- TAB 2 HANDLERS: FILE UPLOAD & GEMINI API ---
+      const handleFileUpload = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        setFileName(file.name);
+        setExamError('');
+        setIsParsingFile(true);
+
+        try {
+          if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
+            const arrayBuffer = await file.arrayBuffer();
+            const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+            let extractedText = '';
+            for (let i = 1; i <= pdf.numPages; i++) {
+              const page = await pdf.getPage(i);
+              const textContent = await page.getTextContent();
+              const pageText = textContent.items.map(item => item.str).join(' ');
+              extractedText += pageText + '\n\n';
+            }
+            if (!extractedText.trim()) {
+              throw new Error('Không trích xuất được văn bản từ file PDF này (có thể là file scan hình ảnh).');
+            }
+            setStudyMaterial(extractedText.trim());
+          } else {
+            // TXT, MD, CSV, etc.
+            const text = await file.text();
+            setStudyMaterial(text);
+          }
+        } catch (err) {
+          setExamError('Lỗi đọc tệp: ' + err.message);
+        } finally {
+          setIsParsingFile(false);
+          e.target.value = '';
+        }
+      };
+
+      const generateExamWithGemini = async (isRegenerate = false) => {
+        if (!apiKey) {
+          setIsSettingsOpen(true);
+          setExamError('Vui lòng nhập Gemini API Key trong phần Cài đặt trước khi tạo đề.');
+          return;
+        }
+        if (!studyMaterial.trim() || studyMaterial.trim().length < 30) {
+          setExamError('Vui lòng nhập hoặc tải lên nội dung tài liệu học tập (tối thiểu 30 ký tự).');
+          return;
+        }
+
+        setIsGenerating(true);
+        setExamError('');
+        setIsSubmitted(false);
+        setUserAnswers({});
+
+        const nextSeed = isRegenerate ? examHistorySeed + 1 : 1;
+        setExamHistorySeed(nextSeed);
+
+        let typeInstruction = '';
+        if (questionType === 'Trắc nghiệm 4 đáp án') {
+          typeInstruction = `Dạng bài: Trắc nghiệm 4 đáp án (A, B, C, D). Mảng "options" phải có đúng 4 chuỗi lựa chọn rõ ràng (không cần ghi tiền tố A., B. vì giao diện sẽ tự đánh nhãn, hoặc nếu có thì đồng nhất). "correctAnswer" phải khớp chính xác 100% với một trong 4 chuỗi trong "options".`;
+        } else if (questionType === 'Điền khuyết') {
+          typeInstruction = `Dạng bài: Điền khuyết (Fill in the blank). Trong "question", dùng dấu "______" để biểu thị chỗ trống cần điền. Mảng "options" để rỗng []. "correctAnswer" là từ hoặc cụm từ ngắn gọn chính xác cần điền vào chỗ trống.`;
+        } else {
+          typeInstruction = `Dạng bài: Tự luận ngắn (Short Answer). Đặt câu hỏi yêu cầu trả lời ngắn gọn 1-3 câu. Mảng "options" để rỗng []. "correctAnswer" là đáp án mẫu chuẩn xác, súc tích.`;
+        }
+
+        const prompt = `Bạn là một chuyên gia giáo dục và khảo thí xuất sắc. Hãy dựa vào TÀI LIỆU HỌC TẬP dưới đây để tạo một đề ôn tập chất lượng cao.
+
+YÊU CẦU CẤU HÌNH:
+- Số lượng câu hỏi: Đúng ${questionCount} câu.
+- Mức độ khó: ${difficulty}.
+- ${typeInstruction}
+- Lần tạo đề thứ: #${nextSeed} ${isRegenerate ? '(QUAN TRỌNG: Hãy khai thác các khía cạnh khác, đặt câu hỏi hoàn toàn mới và đa dạng hơn so với các bộ đề trước từ cùng tài liệu này!)' : ''}
+- Ngôn ngữ: Tiếng Việt (trừ khi tài liệu gốc là ngoại ngữ thì dùng ngôn ngữ phù hợp).
+
+ĐỊNH DẠNG ĐẦU RA BẮT BUỘC (JSON Array):
+Trả về một mảng JSON gồm ${questionCount} đối tượng, mỗi đối tượng có cấu trúc chính xác:
+[
+  {
+    "id": 1,
+    "question": "Nội dung câu hỏi...",
+    "options": ["Lựa chọn 1", "Lựa chọn 2", "Lựa chọn 3", "Lựa chọn 4"],
+    "correctAnswer": "Lựa chọn 1",
+    "explanation": "Giải thích chi tiết tại sao đáp án này đúng dựa trên tài liệu."
+  }
+]
+
+TÀI LIỆU HỌC TẬP:
+"""
+${studyMaterial.slice(0, 30000)}
+"""`;
+
+        try {
+          const response = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(apiKey)}`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                contents: [{ parts: [{ text: prompt }] }],
+                generationConfig: {
+                  temperature: isRegenerate ? 0.85 : 0.5,
+                  responseMimeType: "application/json"
+                }
+              })
+            }
+          );
+
+          const data = await response.json();
+
+          if (!response.ok) {
+            throw new Error(data.error?.message || `Lỗi API (${response.status})`);
+          }
+
+          const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text;
+          if (!rawText) {
+            throw new Error('Không nhận được phản hồi từ Gemini.');
+          }
+
+          // Clean markdown code fences if present despite responseMimeType
+          const cleanedJson = rawText.replace(/^```json\s*/i, '').replace(/```\s*$/i, '').trim();
+          const parsedQuestions = JSON.parse(cleanedJson);
+
+          if (!Array.isArray(parsedQuestions) || parsedQuestions.length === 0) {
+            throw new Error('Dữ liệu đề thi trả về không đúng định dạng danh sách câu hỏi.');
+          }
+
+          setQuestions(parsedQuestions);
+        } catch (err) {
+          console.error(err);
+          setExamError(`Không thể tạo đề thi: ${err.message}. Hãy kiểm tra lại Gemini API Key của bạn.`);
+        } finally {
+          setIsGenerating(false);
+        }
+      };
+
+      const handleAnswerChange = (qIndex, value) => {
+        if (isSubmitted) return;
+        setUserAnswers(prev => ({ ...prev, [qIndex]: value }));
+      };
+
+      const checkQuestionCorrect = (q, qIndex) => {
+        const userAns = (userAnswers[qIndex] || '').trim().toLowerCase();
+        const correctAns = (q.correctAnswer || '').trim().toLowerCase();
+        if (!userAns) return false;
+        if (questionType === 'Trắc nghiệm 4 đáp án') {
+          return userAns === correctAns;
+        }
+        if (questionType === 'Điền khuyết') {
+          return userAns === correctAns || correctAns.includes(userAns) && userAns.length >= 2;
+        }
+        // Tự luận ngắn: kiểm tra từ khóa trùng khớp cơ bản để hỗ trợ chấm tự động
+        const keywords = correctAns.split(/[\s,.;:!?()]+/).filter(w => w.length > 2);
+        if (keywords.length === 0) return userAns === correctAns;
+        const matched = keywords.filter(kw => userAns.includes(kw));
+        return matched.length / keywords.length >= 0.5;
+      };
+
+      const calculateScore = () => {
+        let correctCount = 0;
+        questions.forEach((q, idx) => {
+          if (checkQuestionCorrect(q, idx)) correctCount++;
+        });
+        return correctCount;
+      };
+
+      // --- COMPUTED DATA FOR TAB 1 ---
+      const filteredTodos = todos.filter(t => filterSubject === 'all' || t.subjectId === filterSubject);
+      const completedCount = todos.filter(t => t.completed).length;
+      const progressPercent = todos.length > 0 ? Math.round((completedCount / todos.length) * 100) : 0;
+
+      const priorityBadge = (priority) => {
+        switch (priority) {
+          case 'high':
+            return <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-red-100 text-red-700">Cao</span>;
+          case 'medium':
+            return <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-amber-100 text-amber-700">Trung bình</span>;
+          default:
+            return <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-slate-100 text-slate-600">Thấp</span>;
+        }
+      };
+
+      return (
+        <div className="min-h-screen flex flex-col">
+          {/* --- TOP NAVIGATION BAR --- */}
+          <header className="sticky top-0 z-30 bg-white/90 backdrop-blur-md border-b border-slate-200">
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-2">
+              {/* Brand Logo */}
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-indigo-600 flex items-center justify-center text-white shadow-sm shadow-indigo-200">
+                  <Icon name="graduation-cap" size={20} />
+                </div>
+                <div>
+                  <span className="font-bold text-lg tracking-tight text-slate-900">Study<span className="text-indigo-600">AI</span></span>
+                  <span className="hidden sm:inline-block ml-2 text-xs font-medium px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-600">Smart Workspace</span>
+                </div>
+              </div>
+
+              {/* Center Tabs */}
+              <nav className="flex items-center bg-slate-100 p-1 rounded-xl">
+                <button
+                  onClick={() => setActiveTab('planner')}
+                  className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                    activeTab === 'planner'
+                      ? 'bg-white text-indigo-600 shadow-sm'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <Icon name="layout-dashboard" size={16} />
+                  <span>Quản lý học tập</span>
+                </button>
+                <button
+                  onClick={() => setActiveTab('exam')}
+                  className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                    activeTab === 'exam'
+                      ? 'bg-white text-indigo-600 shadow-sm'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <Icon name="sparkles" size={16} />
+                  <span>Phòng ôn thi AI</span>
+                </button>
+              </nav>
+
+              {/* Settings Button */}
+              <button
+                onClick={() => {
+                  setTempApiKey(apiKey);
+                  setIsSettingsOpen(true);
+                }}
+                className={`flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium border transition-colors ${
+                  apiKey
+                    ? 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                    : 'border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100'
+                }`}
+                title="Cài đặt Gemini API Key"
+              >
+                <Icon name="settings" size={16} />
+                <span className="hidden md:inline">{apiKey ? 'Cài đặt API' : 'Nhập API Key'}</span>
+                {!apiKey && <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>}
+              </button>
+            </div>
+          </header>
+
+          {/* --- MAIN CONTENT AREA --- */}
+          <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
+            
+            {/* ========================================================= */}
+            {/* TAB 1: QUẢN LÝ HỌC TẬP (DASHBOARD & PLANNER)              */}
+            {/* ========================================================= */}
+            {activeTab === 'planner' && (
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                
+                {/* LEFT COLUMN: POMODORO & SUBJECTS (4 cols) */}
+                <div className="lg:col-span-4 space-y-6">
+                  
+                  {/* POMODORO TIMER CARD */}
+                  <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
+                    <div className="flex items-center justify-between mb-4">
+                      <div className="flex items-center gap-2 font-semibold text-slate-800">
+                        <Icon name="timer" size={18} className="text-indigo-600" />
+                        <h2>Đồng hồ Pomodoro</h2>
+                      </div>
+                      <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-slate-100 text-slate-600">
+                        Đã hoàn thành: <strong className="text-indigo-600">{pomodoroSessions}</strong> phiên
+                      </span>
+                    </div>
+
+                    {/* Mode Switcher */}
+                    <div className="grid grid-cols-2 gap-2 p-1 bg-slate-100 rounded-xl mb-5">
+                      <button
+                        onClick={() => switchPomodoroMode('work')}
+                        className={`py-1.5 text-xs font-semibold rounded-lg transition-all ${
+                          pomodoroMode === 'work'
+                            ? 'bg-indigo-600 text-white shadow-sm'
+                            : 'text-slate-600 hover:text-slate-900'
+                        }`}
+                      >
+                        Tập trung (25p)
+                      </button>
+                      <button
+                        onClick={() => switchPomodoroMode('break')}
+                        className={`py-1.5 text-xs font-semibold rounded-lg transition-all ${
+                          pomodoroMode === 'break'
+                            ? 'bg-emerald-600 text-white shadow-sm'
+                            : 'text-slate-600 hover:text-slate-900'
+                        }`}
+                      >
+                        Nghỉ ngắn (5p)
+                      </button>
+                    </div>
+
+                    {/* Countdown Display */}
+                    <div className={`text-center py-6 rounded-2xl mb-5 border ${
+                      pomodoroMode === 'work'
+                        ? 'bg-indigo-50/60 border-indigo-100 text-indigo-950'
+                        : 'bg-emerald-50/60 border-emerald-100 text-emerald-950'
+                    }`}>
+                      <div className="text-5xl font-bold tracking-wider tabular-nums">
+                        {formatTime(timeLeft)}
+                      </div>
+                      <p className="text-xs mt-2 opacity-75 font-medium">
+                        {pomodoroMode === 'work' ? 'Giữ sự tập trung cao độ!' : 'Thư giãn mắt và uống một ngụm nước'}
+                      </p>
+                    </div>
+
+                    {/* Controls */}
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => setIsRunning(!isRunning)}
+                        className={`flex-1 flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl font-semibold text-sm text-white transition-all shadow-sm ${
+                          isRunning
+                            ? 'bg-amber-500 hover:bg-amber-600'
+                            : pomodoroMode === 'work'
+                              ? 'bg-indigo-600 hover:bg-indigo-700'
+                              : 'bg-emerald-600 hover:bg-emerald-700'
+                        }`}
+                      >
+                        <Icon name={isRunning ? 'pause' : 'play'} size={16} />
+                        <span>{isRunning ? 'Tạm dừng' : 'Bắt đầu'}</span>
+                      </button>
+                      <button
+                        onClick={() => switchPomodoroMode(pomodoroMode)}
+                        className="p-2.5 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition-colors"
+                        title="Đặt lại thời gian"
+                      >
+                        <Icon name="rotate-ccw" size={18} />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* SUBJECTS MANAGEMENT CARD */}
+                  <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
+                    <div className="flex items-center justify-between mb-4">
+                      <div className="flex items-center gap-2 font-semibold text-slate-800">
+                        <Icon name="book-open" size={18} className="text-indigo-600" />
+                        <h2>Danh sách môn học</h2>
+                      </div>
+                      <span className="text-xs text-slate-500">{subjects.length} môn</span>
+                    </div>
+
+                    {/* Add Subject Form */}
+                    <form onSubmit={handleAddSubject} className="space-y-3 mb-4">
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          value={newSubjectName}
+                          onChange={(e) => setNewSubjectName(e.target.value)}
+                          placeholder="Tên môn học mới..."
+                          className="flex-1 text-sm px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+                        />
+                        <button
+                          type="submit"
+                          className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-sm font-medium transition-colors flex items-center gap-1"
+                        >
+                          <Icon name="plus" size={16} />
+                          <span>Thêm</span>
+                        </button>
+                      </div>
+                      
+                      {/* Color Picker */}
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-slate-500">Màu nhãn:</span>
+                        <div className="flex gap-1.5">
+                          {SUBJECT_COLORS.map((c, idx) => (
+                            <button
+                              type="button"
+                              key={c.name}
+                              onClick={() => setSelectedColorIdx(idx)}
+                              className={`w-5 h-5 rounded-full ${c.color} transition-transform ${
+                                selectedColorIdx === idx ? 'ring-2 ring-offset-2 ring-slate-400 scale-110' : 'opacity-70 hover:opacity-100'
+                              }`}
+                              title={c.name}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    </form>
+
+                    {/* Subjects List */}
+                    <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+                      {subjects.length === 0 ? (
+                        <p className="text-xs text-slate-400 text-center py-4">Chưa có môn học nào. Hãy thêm môn học đầu tiên!</p>
+                      ) : (
+                        subjects.map((sub) => {
+                          const taskCount = todos.filter(t => t.subjectId === sub.id && !t.completed).length;
+                          return (
+                            <div
+                              key={sub.id}
+                              className="flex items-center justify-between p-2.5 rounded-xl border border-slate-100 bg-slate-50/70 hover:bg-slate-50 transition-colors group"
+                            >
+                              <div className="flex items-center gap-2.5 min-w-0">
+                                <span className={`w-3 h-3 rounded-full shrink-0 ${sub.color}`}></span>
+                                <span className="text-sm font-medium text-slate-700 truncate">{sub.name}</span>
+                                {taskCount > 0 && (
+                                  <span className="text-[11px] px-1.5 py-0.2 rounded-md bg-white border border-slate-200 text-slate-500">
+                                    {taskCount} việc
+                                  </span>
+                                )}
+                              </div>
+                              <button
+                                onClick={() => handleDeleteSubject(sub.id)}
+                                className="text-slate-400 hover:text-red-500 p-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity"
+                                title="Xóa môn học"
+                              >
+                                <Icon name="trash-2" size={15} />
+                              </button>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* RIGHT COLUMN: TO-DO LIST & PROGRESS (8 cols) */}
+                <div className="lg:col-span-8 space-y-6">
+                  
+                  {/* PROGRESS OVERVIEW BAR */}
+                  <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
+                    <div className="flex flex-wrap items-center justify-between gap-4 mb-3">
+                      <div>
+                        <h2 className="font-semibold text-slate-800 text-base">Tiến độ mục tiêu học tập</h2>
+                        <p className="text-xs text-slate-500 mt-0.5">
+                          Đã hoàn thành {completedCount} trên tổng số {todos.length} nhiệm vụ
+                        </p>
+                      </div>
+                      <span className="text-2xl font-bold text-indigo-600">{progressPercent}%</span>
+                    </div>
+                    <div className="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-indigo-600 rounded-full transition-all duration-500"
+                        style={{ width: `${progressPercent}%` }}
+                      ></div>
+                    </div>
+                  </div>
+
+                  {/* TO-DO MANAGER CARD */}
+                  <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
+                    <div className="flex items-center gap-2 font-semibold text-slate-800 mb-4">
+                      <Icon name="check-square" size={18} className="text-indigo-600" />
+                      <h2>Kế hoạch & Việc cần làm (To-do List)</h2>
+                    </div>
+
+                    {/* Add Task Form */}
+                    <form onSubmit={handleAddTodo} className="bg-slate-50 p-4 rounded-xl border border-slate-200/80 mb-5 space-y-3">
+                      <div>
+                        <input
+                          type="text"
+                          value={todoTitle}
+                          onChange={(e) => setTodoTitle(e.target.value)}
+                          placeholder="Nhập nội dung bài tập, chương cần ôn luyện..."
+                          className="w-full text-sm px-3.5 py-2.5 bg-white rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+                        />
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-4 gap-2.5">
+                        {/* Select Subject */}
+                        <select
+                          value={todoSubjectId}
+                          onChange={(e) => setTodoSubjectId(e.target.value)}
+                          className="text-xs sm:text-sm px-3 py-2 bg-white rounded-xl border border-slate-200 focus:outline-none focus:border-indigo-500"
+                        >
+                          {subjects.length === 0 && <option value="">Chưa có môn</option>}
+                          {subjects.map(s => (
+                            <option key={s.id} value={s.id}>{s.name}</option>
+                          ))}
+                        </select>
+
+                        {/* Select Priority */}
+                        <select
+                          value={todoPriority}
+                          onChange={(e) => setTodoPriority(e.target.value)}
+                          className="text-xs sm:text-sm px-3 py-2 bg-white rounded-xl border border-slate-200 focus:outline-none focus:border-indigo-500"
+                        >
+                          <option value="high">Ưu tiên: Cao</option>
+                          <option value="medium">Ưu tiên: Trung bình</option>
+                          <option value="low">Ưu tiên: Thấp</option>
+                        </select>
+
+                        {/* Select Deadline */}
+                        <input
+                          type="date"
+                          value={todoDeadline}
+                          onChange={(e) => setTodoDeadline(e.target.value)}
+                          className="text-xs sm:text-sm px-3 py-2 bg-white rounded-xl border border-slate-200 focus:outline-none focus:border-indigo-500"
+                        />
+
+                        {/* Submit Button */}
+                        <button
+                          type="submit"
+                          disabled={subjects.length === 0}
+                          className="bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 text-white text-sm font-medium py-2 px-4 rounded-xl transition-colors flex items-center justify-center gap-1.5"
+                        >
+                          <Icon name="plus-circle" size={16} />
+                          <span>Thêm việc</span>
+                        </button>
+                      </div>
+                    </form>
+
+                    {/* Subject Filter Pills */}
+                    <div className="flex items-center gap-2 overflow-x-auto pb-3 mb-3 border-b border-slate-100">
+                      <button
+                        onClick={() => setFilterSubject('all')}
+                        className={`px-3 py-1 rounded-full text-xs font-medium shrink-0 transition-colors ${
+                          filterSubject === 'all'
+                            ? 'bg-slate-800 text-white'
+                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                        }`}
+                      >
+                        Tất cả ({todos.length})
+                      </button>
+                      {subjects.map(sub => {
+                        const count = todos.filter(t => t.subjectId === sub.id).length;
+                        return (
+                          <button
+                            key={sub.id}
+                            onClick={() => setFilterSubject(sub.id)}
+                            className={`px-3 py-1 rounded-full text-xs font-medium shrink-0 flex items-center gap-1.5 transition-colors ${
+                              filterSubject === sub.id
+                                ? 'bg-indigo-600 text-white'
+                                : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                            }`}
+                          >
+                            <span className={`w-2 h-2 rounded-full ${filterSubject === sub.id ? 'bg-white' : sub.color}`}></span>
+                            <span>{sub.name} ({count})</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {/* Tasks List */}
+                    <div className="space-y-2.5">
+                      {filteredTodos.length === 0 ? (
+                        <div className="text-center py-10 text-slate-400">
+                          <Icon name="clipboard-check" size={36} className="mx-auto mb-2 opacity-40" />
+                          <p className="text-sm">Không có nhiệm vụ nào trong mục này.</p>
+                        </div>
+                      ) : (
+                        filteredTodos.map(todo => {
+                          const sub = subjects.find(s => s.id === todo.subjectId);
+                          const isOverdue = !todo.completed && todo.deadline && todo.deadline < new Date().toISOString().split('T')[0];
+
+                          return (
+                            <div
+                              key={todo.id}
+                              className={`flex items-start sm:items-center justify-between gap-3 p-3.5 rounded-xl border transition-all ${
+                                todo.completed
+                                  ? 'bg-slate-50/60 border-slate-100 opacity-65'
+                                  : 'bg-white border-slate-200 hover:border-indigo-200 shadow-xs'
+                              }`}
+                            >
+                              <div className="flex items-start sm:items-center gap-3 min-w-0 flex-1">
+                                <button
+                                  onClick={() => toggleTodo(todo.id)}
+                                  className={`mt-0.5 sm:mt-0 w-5 h-5 rounded-md border flex items-center justify-center shrink-0 transition-colors ${
+                                    todo.completed
+                                      ? 'bg-indigo-600 border-indigo-600 text-white'
+                                      : 'border-slate-300 hover:border-indigo-500'
+                                  }`}
+                                >
+                                  {todo.completed && <Icon name="check" size={13} />}
+                                </button>
+
+                                <div className="min-w-0 flex-1">
+                                  <p className={`text-sm font-medium break-words ${todo.completed ? 'line-through text-slate-400' : 'text-slate-800'}`}>
+                                    {todo.title}
+                                  </p>
+                                  <div className="flex flex-wrap items-center gap-2 mt-1.5">
+                                    {sub && (
+                                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium ${sub.bgLight} ${sub.textColor}`}>
+                                        <span className={`w-1.5 h-1.5 rounded-full ${sub.color}`}></span>
+                                        {sub.name}
+                                      </span>
+                                    )}
+                                    {priorityBadge(todo.priority)}
+                                    {todo.deadline && (
+                                      <span className={`inline-flex items-center gap-1 text-xs ${isOverdue ? 'text-red-600 font-medium' : 'text-slate-500'}`}>
+                                        <Icon name="calendar" size={12} />
+                                        {todo.deadline}
+                                        {isOverdue && ' (Quá hạn)'}
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+
+                              <button
+                                onClick={() => deleteTodo(todo.id)}
+                                className="text-slate-400 hover:text-red-500 p-1.5 rounded-lg hover:bg-red-50 transition-colors shrink-0"
+                                title="Xóa công việc"
+                              >
+                                <Icon name="trash-2" size={16} />
+                              </button>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ========================================================= */}
+            {/* TAB 2: PHÒNG ÔN THI AI (AI EXAM GENERATOR)                */}
+            {/* ========================================================= */}
+            {activeTab === 'exam' && (
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                
+                {/* LEFT COLUMN: MATERIAL INPUT & CONFIG (5 cols) */}
+                <div className="lg:col-span-5 space-y-5">
+                  <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2 font-semibold text-slate-800">
+                        <Icon name="file-text" size={18} className="text-indigo-600" />
+                        <h2>1. Nguồn tài liệu ôn tập</h2>
+                      </div>
+                      {studyMaterial && (
+                        <button
+                          onClick={() => {
+                            setStudyMaterial('');
+                            setFileName('');
+                            setQuestions([]);
+                            setIsSubmitted(false);
+                          }}
+                          className="text-xs text-slate-400 hover:text-red-500 flex items-center gap-1"
+                        >
+                          <Icon name="x" size={14} /> Xóa nội dung
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Upload Box */}
+                    <label className="flex flex-col items-center justify-center w-full p-4 border-2 border-dashed border-slate-200 hover:border-indigo-400 rounded-xl bg-slate-50/60 hover:bg-indigo-50/30 cursor-pointer transition-colors">
+                      <div className="flex items-center gap-2 text-indigo-600 font-medium text-sm">
+                        <Icon name="upload-cloud" size={20} />
+                        <span>{isParsingFile ? 'Đang trích xuất văn bản...' : 'Tải lên tệp (.txt, .md, .pdf)'}</span>
+                      </div>
+                      <p className="text-xs text-slate-400 mt-1 text-center">
+                        {fileName ? `Đã chọn: ${fileName}` : 'Hoặc dán trực tiếp nội dung bài học vào khung bên dưới'}
+                      </p>
+                      <input
+                        type="file"
+                        accept=".txt,.md,.pdf,text/plain,text/markdown,application/pdf"
+                        onChange={handleFileUpload}
+                        className="hidden"
+                      />
+                    </label>
+
+                    {/* Textarea */}
+                    <div>
+                      <textarea
+                        rows={7}
+                        value={studyMaterial}
+                        onChange={(e) => setStudyMaterial(e.target.value)}
+                        placeholder="Dán nội dung bài giảng, tóm tắt lý thuyết, ghi chú hoặc đoạn văn bản cần ôn thi tại đây..."
+                        className="w-full text-sm p-3.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 resize-y"
+                      />
+                      <div className="flex justify-between text-xs text-slate-400 mt-1">
+                        <span>Hỗ trợ tối đa ~30.000 ký tự</span>
+                        <span>{studyMaterial.length.toLocaleString()} ký tự</span>
+                      </div>
+                    </div>
+
+                    {/* Exam Settings */}
+                    <div className="pt-2 border-t border-slate-100 space-y-3">
+                      <div className="flex items-center gap-2 font-semibold text-slate-800 text-sm">
+                        <Icon name="sliders" size={16} className="text-indigo-600" />
+                        <h3>2. Tùy chỉnh cấu trúc đề thi</h3>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-xs font-medium text-slate-600 mb-1">Số lượng câu hỏi</label>
+                          <select
+                            value={questionCount}
+                            onChange={(e) => setQuestionCount(Number(e.target.value))}
+                            className="w-full text-sm px-3 py-2 rounded-xl border border-slate-200 bg-white focus:outline-none focus:border-indigo-500"
+                          >
+                            <option value={5}>5 câu hỏi</option>
+                            <option value={10}>10 câu hỏi</option>
+                            <option value={20}>20 câu hỏi</option>
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-medium text-slate-600 mb-1">Mức độ khó</label>
+                          <select
+                            value={difficulty}
+                            onChange={(e) => setDifficulty(e.target.value)}
+                            className="w-full text-sm px-3 py-2 rounded-xl border border-slate-200 bg-white focus:outline-none focus:border-indigo-500"
+                          >
+                            <option value="Dễ">Dễ (Nhận biết)</option>
+                            <option value="Trung bình">Trung bình (Thông hiểu)</option>
+                            <option value="Khó">Khó (Vận dụng cao)</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-medium text-slate-600 mb-1">Dạng bài kiểm tra</label>
+                        <select
+                          value={questionType}
+                          onChange={(e) => setQuestionType(e.target.value)}
+                          className="w-full text-sm px-3 py-2 rounded-xl border border-slate-200 bg-white focus:outline-none focus:border-indigo-500"
+                        >
+                          <option value="Trắc nghiệm 4 đáp án">Trắc nghiệm 4 đáp án (A, B, C, D)</option>
+                          <option value="Điền khuyết">Điền khuyết (Điền từ vào chỗ trống)</option>
+                          <option value="Tự luận ngắn">Tự luận ngắn (Trả lời câu hỏi)</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    {/* Error Alert */}
+                    {examError && (
+                      <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs flex items-start gap-2">
+                        <Icon name="alert-circle" size={16} className="shrink-0 mt-0.5" />
+                        <span>{examError}</span>
+                      </div>
+                    )}
+
+                    {/* Generate CTA */}
+                    <button
+                      onClick={() => generateExamWithGemini(false)}
+                      disabled={isGenerating || isParsingFile}
+                      className="w-full py-3 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white font-semibold text-sm shadow-sm shadow-indigo-200 transition-all flex items-center justify-center gap-2"
+                    >
+                      {isGenerating ? (
+                        <>
+                          <Icon name="loader-2" size={18} className="animate-spin" />
+                          <span>AI đang phân tích & biên soạn đề...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Icon name="sparkles" size={18} />
+                          <span>Tạo đề ôn tập</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+
+                {/* RIGHT COLUMN: INTERACTIVE EXAM WORKSPACE (7 cols) */}
+                <div className="lg:col-span-7">
+                  {questions.length === 0 && !isGenerating ? (
+                    <div className="bg-white rounded-2xl border border-slate-200 p-10 text-center h-full flex flex-col items-center justify-center min-h-[420px]">
+                      <div className="w-16 h-16 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center mb-4">
+                        <Icon name="brain-circuit" size={32} />
+                      </div>
+                      <h3 className="text-lg font-semibold text-slate-800">Sẵn sàng luyện đề cùng StudyAI</h3>
+                      <p className="text-sm text-slate-500 max-w-md mt-2 leading-relaxed">
+                        Nhập tài liệu học tập hoặc tải file PDF/TXT ở cột bên trái, chọn cấu hình mong muốn và nhấn <strong>"Tạo đề ôn tập"</strong> để AI tự động sinh đề thi tương tác không giới hạn.
+                      </p>
+                    </div>
+                  ) : isGenerating ? (
+                    <div className="bg-white rounded-2xl border border-slate-200 p-10 text-center h-full flex flex-col items-center justify-center min-h-[420px]">
+                      <div className="w-14 h-14 rounded-full border-4 border-indigo-100 border-t-indigo-600 animate-spin mb-4"></div>
+                      <h3 className="text-base font-semibold text-slate-800">Gemini 2.5 Flash đang tạo bộ câu hỏi...</h3>
+                      <p className="text-xs text-slate-500 mt-1">Quá trình này thường mất từ 3 đến 8 giây tùy độ dài tài liệu.</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-5">
+                      {/* Exam Header & Score Summary */}
+                      <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm flex flex-wrap items-center justify-between gap-4">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-indigo-100 text-indigo-700">
+                              Đề số #{examHistorySeed}
+                            </span>
+                            <span className="text-xs text-slate-500">{questions.length} câu • Mức độ: {difficulty}</span>
+                          </div>
+                          <h2 className="font-bold text-slate-800 text-lg mt-1">Bài kiểm tra ôn tập</h2>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => generateExamWithGemini(true)}
+                            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-indigo-200 bg-indigo-50/70 hover:bg-indigo-100 text-indigo-700 text-xs font-semibold transition-colors"
+                          >
+                            <Icon name="refresh-cw" size={14} />
+                            <span>Tạo đề mới từ tài liệu này</span>
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Score Banner after Submission */}
+                      {isSubmitted && (
+                        <div className="bg-gradient-to-r from-indigo-600 to-violet-600 rounded-2xl p-5 text-white shadow-md flex flex-wrap items-center justify-between gap-4">
+                          <div>
+                            <p className="text-indigo-100 text-xs font-medium uppercase tracking-wider">Kết quả chấm điểm tự động</p>
+                            <div className="flex items-baseline gap-3 mt-1">
+                              <span className="text-3xl font-bold">
+                                {calculateScore()}/{questions.length} câu đúng
+                              </span>
+                              <span className="text-sm bg-white/20 px-2.5 py-0.5 rounded-full font-medium">
+                                Điểm: {((calculateScore() / questions.length) * 10).toFixed(1)} / 10
+                              </span>
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => {
+                              setIsSubmitted(false);
+                              setUserAnswers({});
+                            }}
+                            className="px-4 py-2 bg-white text-indigo-700 hover:bg-indigo-50 rounded-xl text-xs font-semibold transition-colors"
+                          >
+                            Làm lại đề này
+                          </button>
+                        </div>
+                      )}
+
+                      {/* Questions List */}
+                      <div className="space-y-4">
+                        {questions.map((q, qIdx) => {
+                          const isCorrect = isSubmitted ? checkQuestionCorrect(q, qIdx) : null;
+                          const optionLetters = ['A', 'B', 'C', 'D', 'E'];
+
+                          return (
+                            <div
+                              key={qIdx}
+                              className={`bg-white rounded-2xl border p-5 shadow-xs transition-all ${
+                                isSubmitted
+                                  ? isCorrect
+                                    ? 'border-emerald-300 bg-emerald-50/10'
+                                    : 'border-red-300 bg-red-50/10'
+                                  : 'border-slate-200'
+                              }`}
+                            >
+                              {/* Question Header */}
+                              <div className="flex items-start justify-between gap-3 mb-3">
+                                <h3 className="text-sm sm:text-base font-semibold text-slate-800 leading-snug">
+                                  <span className="text-indigo-600 mr-1.5">Câu {qIdx + 1}:</span>
+                                  {q.question}
+                                </h3>
+                                {isSubmitted && (
+                                  <span className={`shrink-0 inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold ${
+                                    isCorrect ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'
+                                  }`}>
+                                    <Icon name={isCorrect ? 'check-circle-2' : 'x-circle'} size={14} />
+                                    {isCorrect ? 'Chính xác' : 'Chưa đúng'}
+                                  </span>
+                                )}
+                              </div>
+
+                              {/* Answer Input Area based on Question Type */}
+                              {questionType === 'Trắc nghiệm 4 đáp án' && Array.isArray(q.options) && q.options.length > 0 ? (
+                                <div className="space-y-2 mt-3">
+                                  {q.options.map((opt, optIdx) => {
+                                    const selected = userAnswers[qIdx] === opt;
+                                    const isThisCorrectOption = opt.trim().toLowerCase() === (q.correctAnswer || '').trim().toLowerCase();
+
+                                    let optionStyle = 'border-slate-200 hover:border-indigo-300 hover:bg-slate-50';
+                                    if (!isSubmitted && selected) {
+                                      optionStyle = 'border-indigo-600 bg-indigo-50/70 text-indigo-900 font-medium';
+                                    } else if (isSubmitted) {
+                                      if (isThisCorrectOption) {
+                                        optionStyle = 'border-emerald-500 bg-emerald-50 text-emerald-900 font-medium';
+                                      } else if (selected && !isThisCorrectOption) {
+                                        optionStyle = 'border-red-400 bg-red-50 text-red-900';
+                                      } else {
+                                        optionStyle = 'border-slate-100 opacity-60';
+                                      }
+                                    }
+
+                                    return (
+                                      <button
+                                        key={optIdx}
+                                        type="button"
+                                        disabled={isSubmitted}
+                                        onClick={() => handleAnswerChange(qIdx, opt)}
+                                        className={`w-full text-left p-3 rounded-xl border text-sm flex items-center gap-3 transition-all ${optionStyle}`}
+                                      >
+                                        <span className={`w-6 h-6 rounded-lg text-xs font-bold flex items-center justify-center shrink-0 ${
+                                          !isSubmitted && selected
+                                            ? 'bg-indigo-600 text-white'
+                                            : isSubmitted && isThisCorrectOption
+                                              ? 'bg-emerald-600 text-white'
+                                              : isSubmitted && selected
+                                                ? 'bg-red-500 text-white'
+                                                : 'bg-slate-100 text-slate-600'
+                                        }`}>
+                                          {optionLetters[optIdx] || optIdx + 1}
+                                        </span>
+                                        <span className="flex-1">{opt}</span>
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              ) : (
+                                /* Fill in the blank OR Short Answer */
+                                <div className="mt-3">
+                                  {questionType === 'Điền khuyết' ? (
+                                    <input
+                                      type="text"
+                                      disabled={isSubmitted}
+                                      value={userAnswers[qIdx] || ''}
+                                      onChange={(e) => handleAnswerChange(qIdx, e.target.value)}
+                                      placeholder="Nhập từ/cụm từ còn thiếu..."
+                                      className="w-full text-sm px-3.5 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:border-indigo-500 disabled:bg-slate-50"
+                                    />
+                                  ) : (
+                                    <textarea
+                                      rows={2}
+                                      disabled={isSubmitted}
+                                      value={userAnswers[qIdx] || ''}
+                                      onChange={(e) => handleAnswerChange(qIdx, e.target.value)}
+                                      placeholder="Nhập câu trả lời ngắn gọn của bạn..."
+                                      className="w-full text-sm px-3.5 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:border-indigo-500 disabled:bg-slate-50"
+                                    />
+                                  )}
+                                </div>
+                              )}
+
+                              {/* Explanation Box after Submission */}
+                              {isSubmitted && (
+                                <div className="mt-4 p-3.5 rounded-xl bg-slate-50 border border-slate-200/80 text-xs sm:text-sm space-y-1.5">
+                                  <div className="font-semibold text-emerald-700 flex items-center gap-1.5">
+                                    <Icon name="check-circle" size={15} />
+                                    <span>Đáp án chuẩn: {q.correctAnswer}</span>
+                                  </div>
+                                  <p className="text-slate-600 leading-relaxed">
+                                    <strong className="text-slate-700">Giải thích:</strong> {q.explanation}
+                                  </p>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      {/* Submit Exam Footer Button */}
+                      {!isSubmitted && (
+                        <div className="sticky bottom-4 bg-white/95 backdrop-blur-md p-4 rounded-2xl border border-slate-200 shadow-lg flex items-center justify-between gap-4">
+                          <span className="text-xs sm:text-sm text-slate-600">
+                            Đã trả lời: <strong>{Object.values(userAnswers).filter(v => v && v.trim() !== '').length}</strong> / {questions.length} câu
+                          </span>
+                          <button
+                            onClick={() => setIsSubmitted(true)}
+                            className="px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-sm shadow-sm transition-colors flex items-center gap-2"
+                          >
+                            <Icon name="send" size={16} />
+                            <span>Nộp bài & Chấm điểm</span>
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </main>
+
+          {/* --- SETTINGS MODAL (GEMINI API KEY) --- */}
+          {isSettingsOpen && (
+            <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4">
+              <div className="bg-white rounded-2xl border border-slate-200 max-w-md w-full p-6 shadow-xl animate-in fade-in zoom-in-95 duration-150">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-9 h-9 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
+                      <Icon name="key-round" size={18} />
+                    </div>
+                    <div>
+                      <h3 className="font-bold text-slate-800 text-base">Cài đặt Gemini API Key</h3>
+                      <p className="text-xs text-slate-500">Kết nối trực tiếp với mô hình gemini-2.5-flash</p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setIsSettingsOpen(false)}
+                    className="text-slate-400 hover:text-slate-600 p-1 rounded-lg"
+                  >
+                    <Icon name="x" size={18} />
+                  </button>
+                </div>
+
+                <form onSubmit={handleSaveApiKey} className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                      Google Gemini API Key
+                    </label>
+                    <input
+                      type="password"
+                      value={tempApiKey}
+                      onChange={(e) => setTempApiKey(e.target.value)}
+                      placeholder="AIzaSy..."
+                      className="w-full text-sm px-3.5 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 font-mono"
+                    />
+                    <p className="text-xs text-slate-500 mt-2 leading-relaxed">
+                      Key của bạn được lưu cục bộ trên trình duyệt (<code className="bg-slate-100 px-1 rounded">LocalStorage</code>) và chỉ gửi trực tiếp đến máy chủ Google API. Lấy key miễn phí tại{' '}
+                      <a
+                        href="https://aistudio.google.com/app/apikey"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-indigo-600 hover:underline font-medium"
+                      >
+                        Google AI Studio
+                      </a>.
+                    </p>
+                  </div>
+
+                  {keySavedToast && (
+                    <div className="p-2.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-medium flex items-center gap-2">
+                      <Icon name="check-circle-2" size={16} />
+                      <span>Đã lưu API Key thành công!</span>
+                    </div>
+                  )}
+
+                  <div className="flex items-center justify-end gap-2 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setIsSettingsOpen(false)}
+                      className="px-4 py-2 rounded-xl text-sm font-medium text-slate-600 hover:bg-slate-100 transition-colors"
+                    >
+                      Đóng
+                    </button>
+                    <button
+                      type="submit"
+                      className="px-5 py-2 rounded-xl text-sm font-semibold bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm transition-colors"
+                    >
+                      Lưu cấu hình
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
